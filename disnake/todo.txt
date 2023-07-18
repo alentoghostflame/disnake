@@ -1,4 +1,6 @@
 Think about each module only containing errors relevant for that section?
     IE, HTTP errors only being in disnake.http.errors?
 
+It should be intended that user only interacts with Bot, it's attributes, and objects retrieved via Bot or its
+    attributes. Retrieving behavior must be reasonably swappable without breaking reasonable user code.
 
