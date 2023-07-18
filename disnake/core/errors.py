@@ -11,6 +11,7 @@ __all__ = (
     "DiscordException",
     "DiscordServerError",
     "Forbidden",
+    "GatewayNotFound",
     "HTTPException",
     "NotFound",
     "Unauthorized",
@@ -36,6 +37,10 @@ def _flatten_error_dict(d: dict[str, Any], key: str = "") -> dict[str, str]:
 
 
 class DiscordException(Exception):
+    """Base exception class for disnake.
+
+    Ideally speaking, this could be caught to handle any exceptions raised from this library.
+    """
     pass
 
 
@@ -121,7 +126,11 @@ class DiscordServerError(HTTPException):
     pass
 
 
+class GatewayNotFound(DiscordException):
+    """An exception that is raised when the gateway for Discord could not be found"""
 
-
+    def __init__(self) -> None:
+        message = "The gateway to connect to Discord was not found."
+        super().__init__(message)
 
 

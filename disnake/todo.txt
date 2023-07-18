@@ -1,0 +1,4 @@
+Think about each module only containing errors relevant for that section?
+    IE, HTTP errors only being in disnake.http.errors?
+
+

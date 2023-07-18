@@ -29,6 +29,7 @@ from typing import (
 from urllib.parse import quote as _uriquote
 
 import aiohttp
+import yarl
 
 from .. import core
 from .. import __version__
@@ -459,7 +460,7 @@ class HTTPHandler:
         # TODO: Think about adding ratelimit_multiplier? Would reduce the internal RateLimit.limit by that
         #  float (such as 0.7) and could allow people to run multiple NC bots/processes on the same token while avoiding
         #  ratelimit issues. Could also help with replit-style scenarios.
-        self.__session: aiohttp.ClientSession = core.MISSING  # filled in static_login
+        self.__session: aiohttp.ClientSession = core.MISSING  # Filled on-demand in request.
         self._connector = connector
         self._default_max_per_second = default_max_per_second
         """Maximum amount of requests per second per authorization."""
@@ -532,26 +533,26 @@ class HTTPHandler:
 
         return ret
 
-    def recreate(self) -> None:
-        if self.__session.closed:
-            self.__session = aiohttp.ClientSession(
-                connector=self._connector, ws_response_class=DiscordClientWebSocketResponse
-            )
+    # def recreate(self) -> None:
+    #     if self.__session.closed:
+    #         self.__session = aiohttp.ClientSession(
+    #             connector=self._connector, ws_response_class=DiscordClientWebSocketResponse
+    #         )
 
-    async def ws_connect(self, url: str, *, compress: int = 0) -> Any:
-        kwargs = {
-            "proxy_auth": self._proxy_auth,
-            "proxy": self._proxy,
-            "max_msg_size": 0,
-            "timeout": 30.0,
-            "autoclose": False,
-            "headers": {
-                "User-Agent": self._user_agent,
-            },
-            "compress": compress,
-        }
-
-        return await self.__session.ws_connect(url, **kwargs)
+    # async def ws_connect(self, url: str, *, compress: int = 0) -> Any:
+    #     kwargs = {
+    #         "proxy_auth": self._proxy_auth,
+    #         "proxy": self._proxy,
+    #         "max_msg_size": 0,
+    #         "timeout": 30.0,
+    #         "autoclose": False,
+    #         "headers": {
+    #             "User-Agent": self._user_agent,
+    #         },
+    #         "compress": compress,
+    #     }
+    #
+    #     return await self.__session.ws_connect(url, **kwargs)
 
     async def request(
         self,
@@ -562,7 +563,7 @@ class HTTPHandler:
         auth: Optional[str] = None,
         **kwargs: Any,
     ) -> Any:
-        if not self.__session:
+        if not self.__session or self.__session.closed:
             # TODO: Do we even use a websocket response here? is that JUST for the gateway stuff?
             # self.__session = aiohttp.ClientSession(
             #     connector=self._connector, ws_response_class=DiscordClientWebSocketResponse
@@ -2822,15 +2823,19 @@ class HTTPHandler:
     #
     #     return self.format_websocket_url(data["url"], encoding, zlib)
     #
-    # async def get_bot_gateway(
-    #     self, *, encoding: str = "json", zlib: bool = True
-    # ) -> Tuple[int, str]:
-    #     try:
-    #         data = await self.request(Route("GET", "/gateway/bot"))
-    #     except HTTPException as exc:
-    #         raise GatewayNotFound() from exc
-    #
-    #     return data["shards"], self.format_websocket_url(data["url"], encoding, zlib)
+    async def get_bot_gateway(
+            self, *, encoding: str = "json", zlib: bool = True
+    ) -> tuple[int, str, dict]:
+        try:
+            data = await self.request(Route("GET", "/gateway/bot"))
+        except core.HTTPException as exc:
+            raise core.GatewayNotFound from exc
+
+        return (
+            data["shards"],
+            self._format_gateway_url(data["url"], encoding=encoding, zlib=zlib),
+            data["session_start_limit"],
+        )
     #
     # def get_user(self, user_id: Snowflake) -> Response[user.User]:
     #     return self.request(Route("GET", "/users/{user_id}", user_id=user_id))
@@ -3045,3 +3050,18 @@ class HTTPHandler:
     #         application_id=application_id,
     #     )
     #     return self.request(r, json=data, reason=reason)
+
+    @staticmethod
+    def _format_gateway_url(url: str, *, encoding: str, zlib: bool) -> str:
+        _url = yarl.URL(url)
+        params = _url.query.copy()
+        params["v"] = str(_API_VERSION)
+        params["encoding"] = encoding
+        if zlib:
+            params["compress"] = "zlib-stream"
+        else:
+            params.popall("compress", None)
+        return str(_url.with_query(params))
+
+    def get_user(self, user_id: Snowflake) -> Response[user.User]:
+        return self.request(Route("GET", "/users/{user_id}", user_id=user_id))
