@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from logging import getLogger
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -12,6 +13,14 @@ from .. import core
 
 if TYPE_CHECKING:
     from ..http import HTTPHandler
+
+
+__all__ = (
+    "DiscordWebSocket",
+)
+
+
+logger = getLogger(__name__)
 
 
 class DiscordWebSocket:
@@ -40,10 +49,17 @@ class DiscordWebSocket:
         self._token: str | None = None
         self._intents: int | None = None
 
+    @property
+    def running(self) -> bool:
+        if self._ws and not self._ws.closed:
+            return True
+        else:
+            return False
+
     def set_http_handler(self, http_handler: HTTPHandler):
         self._http = http_handler
 
-    def get_identify_payload(self) -> dict:
+    def _get_identify_payload(self) -> dict:
         if self._token is None:
             raise core.DiscordException("Cannot create identify payload without token being set.")
 
@@ -71,6 +87,37 @@ class DiscordWebSocket:
 
         return ret
 
+    async def _ws_receive_loop(self):
+        """Blocking Websocket receive loop."""
+
+        if self._http is None:
+            raise core.DiscordException("The HTTP Handler must be set before running ws_receive_loop.")
+        if self._session is None:
+            self._session = aiohttp.ClientSession()
+
+        logger.debug("Attempting to connect to connect to gateway as Shard %s/%s.", self._shard_id, self._shard_count)
+        while not self._session.closed:
+            ws = None
+            try:
+                hello_received = False
+                ws = await self._session.ws_connect(
+                    url=self._gateway_url,
+                    max_msg_size=0,
+                    timeout=30.0,
+                    autoclose=False,
+                    headers={"User-Agent": self._http._user_agent},  # TODO: Think about a better way to do this? A
+                    #                                                   custom Gateway User-Agent? Does Discord
+                    #                                                   hate that?
+                    compress=0,
+                )
+                async for msg in ws:
+                    pass
+
+
+            except Exception as e:
+                logger.error("Exception in Shard %s/%s", self._shard_id, self._shard_count, exc_info=e)
+                raise e
+
     async def start(
             self,
             *,
@@ -92,18 +139,22 @@ class DiscordWebSocket:
         self._token = token
         self._intents = intents
 
-        if self._session is None:
-            self._session = aiohttp.ClientSession()
+        # self._ws = self._session.ws_connect(
+        #     url=gateway_url,
+        #     max_msg_size=0,
+        #     timeout=30.0,
+        #     autoclose=False,
+        #     headers={"User-Agent": self._http._user_agent},  # TODO: Think about a better way to do this? A custom
+        #                                                      #  Gateway User-Agent? Does Discord hate that?
+        #     compress=0,
+        # )
 
-        self._ws = self._session.ws_connect(
-            url=gateway_url,
-            max_msg_size=0,
-            timeout=30.0,
-            autoclose=False,
-            headers={"User-Agent": self._http._user_agent},  # TODO: Think about a better way to do this? A custom
-                                                             #  Gateway User-Agent? Does Discord hate that?
-            compress=0,
-        )
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+
+        if self._ws and not self._ws.closed:
+            await self._ws.close()
 
 
 
